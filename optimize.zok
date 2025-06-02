@@ -1,0 +1,28 @@
+import "hashes/sha256/512bitPacked" as sha;
+import "utils/casts/field_to_u32" as to_u32;
+
+// Anything that is iterable must be predefined
+const u32 GAMMA32 = 1776090575;
+
+
+def main(
+    private  field[4] gamma,          // 512 bits of private input
+    public  field[2] hash_gamma,     // SHA256 hash of gamma
+    public  field C,                 // C = gen ** gamma % p
+    public  field gen                // Generator
+    
+) {
+    // Step 1: Hash gamma and verify
+    field[2] computed_hash = sha(gamma);
+    assert(computed_hash == hash_gamma);
+
+    // Step 2: Convert to scalar (only gamma[0] is used, i.e., 128 bits max)
+    field gamma_scalar = gamma[0];
+    u32 gamma32 = to_u32(gamma_scalar);
+
+    // Step 3: Compute gen ** gamma32 with secure masking
+    field computed_C = gen ** GAMMA32;
+    assert(C == computed_C);
+
+    return;
+}
