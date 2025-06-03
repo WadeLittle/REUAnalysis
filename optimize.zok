@@ -16,9 +16,6 @@ def main(
     field[2] computed_hash = sha(gamma);
     assert(computed_hash == hash_gamma);
 
-    // Step 2: Convert to scalar (only gamma[0] is used, i.e., 128 bits max)
-    field gamma_scalar = gamma[0];
-    u32 gamma32 = to_u32(gamma_scalar);
 
     // Step 3: Compute gen ** gamma32 with secure masking
     field computed_C = gen ** GAMMA32;
