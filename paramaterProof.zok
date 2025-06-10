@@ -1,0 +1,119 @@
+//   Copyright 2025 Wade Little
+
+#pragma curve bn128
+import "utils/pack/bool/pack256" as pack; // Assuming this path is correct for your ZoKrates environment and 'pack' converts bool[256] to a field element
+import "utils/casts/bool_256_to_u32_8" as to32;
+import "hashes/sha256/256bitPadded" as sha;
+
+const u32 DOUBLE = 2;
+
+
+// This helper function is correct and is used for selecting between POINTS.
+def cselect(bool condition, field[2] if_true, field[2] if_false) -> field[2] {
+    field b = condition ? 1 : 0;
+    field x = b * if_true[0] + (1 - b) * if_false[0];
+    field y = b * if_true[1] + (1 - b) * if_false[1];
+    return [x, y];
+}
+
+// --- FINAL CORRECTED point_double ---
+def point_double(field[2] p) -> field[2] {
+    // If y == 0, return infinity
+    bool is_inf = p[1] == 0;
+    field denom = is_inf ? 1 : 2 * p[1];
+    field lambda = (3 * p[0] * p[0]) / denom;
+    field x3 = lambda * lambda - 2 * p[0];
+    field y3 = lambda * (p[0] - x3) - p[1];
+    field[2] doubled = [x3, y3];
+    return cselect(is_inf, [0, 0], doubled);
+}
+
+// --- FINAL CORRECTED point_add ---
+def point_add(field[2] p1, field[2] p2) -> field[2] {
+    bool p1_inf = p1[0] == 0 && p1[1] == 0;
+    bool p2_inf = p2[0] == 0 && p2[1] == 0;
+    bool same_x = p1[0] == p2[0];
+    bool y_sum_zero = p1[1] + p2[1] == 0;
+    bool unsafe = same_x && y_sum_zero;
+
+    field dx = p2[0] - p1[0];
+    field denom = unsafe ? 1 : dx;
+    field lambda = (p2[1] - p1[1]) / denom;
+    field x3 = lambda * lambda - p1[0] - p2[0];
+    field y3 = lambda * (p1[0] - x3) - p1[1];
+    field[2] sum = [x3, y3];
+
+    field[2] after_unsafe = cselect(unsafe, [0, 0], sum);
+    field[2] after_p2_inf = cselect(p2_inf, p1, after_unsafe);
+    return cselect(p1_inf, p2, after_p2_inf);
+}
+def scalar_mul(bool[256] scalar, field[2] base) -> field[2] {
+    field[2] mut acc = [0, 0];
+    field[2] mut curr = base;
+    for u32 i in 0..256 {
+        acc = cselect(scalar[i], point_add(acc, curr), acc);
+        curr = point_double(curr);
+    }
+    return acc;
+}
+
+def reverse256(bool[256] arr) -> bool[256] {
+    bool[256] mut out = arr ;
+    for u32 i in 0..256 {
+        out[i] = arr[255 - i];
+    }
+    return out;
+}
+
+
+
+def main(
+    private  bool[256] gamma,      // 256 bits of private input for gamma
+    private bool[256] beta,       // 256 bits of private input for beta
+    private bool[256] b_g_scalar_bits,
+    public u32[8] hash_gamma,    
+    public field[2] gen,           // Public base point G1 (on bn256)
+    public field[2] gg,           // Public input: claimed g1^gamma
+    public field[2] gb,           // Public input: claimed g2^beta
+    public field[2] c_star        // Public input: claimed c* = g1^(beta/gamma)
+) -> (field[2], field[2], field[2]) { // Returns the calculated points
+
+    //  Check that hashed gamma is equal to the passed gamma.
+    u32[8] hash = sha(to32(gamma));
+    assert(hash == hash_gamma);
+
+
+    // Pack boolean arrays (representing scalars) into field elements.
+    field f_gamma = pack(gamma);
+    field f_beta = pack(beta);
+    field f_b_g_scalar = pack(b_g_scalar_bits);
+    assert(f_b_g_scalar * f_gamma == f_beta);
+
+    // Ensure f_gamma is not zero to prevent division by zero.
+    assert(f_gamma != 0);
+    assert(f_beta != 0);
+
+
+    // Calculate c_star_calculated = g1^(beta/gamma)
+    field[2] c_star_calculated = scalar_mul(b_g_scalar_bits, gen);
+
+    // Assert that the calculated c* matches the public input c_star.
+     assert(c_star[0] == c_star_calculated[0] && c_star[1] == c_star_calculated[1]);
+
+    // Calculate g_gamma_calculated = g1^gamma.
+    field[2]  g_gamma_calculated = scalar_mul(gamma, gen);
+
+    // Assert that the calculated g1^gamma matches the public input gg.
+    assert(gg[0] == g_gamma_calculated[0] && gg[1] == g_gamma_calculated[1]);
+
+    // Calculate g_beta_calculated = g2^beta
+    field[2] g_beta_calculated = scalar_mul(beta, gen);
+
+    // Assert that the calculated g2^beta matches the public input gb.
+    assert(gb[0] == g_beta_calculated[0] && gb[1] == g_beta_calculated[1]);
+
+    // Return the calculatued values. These values have been asserted to match
+    // the corresponding public inputs, proving consistency.
+    return (g_gamma_calculated, g_beta_calculated, c_star_calculated);
+}
+
