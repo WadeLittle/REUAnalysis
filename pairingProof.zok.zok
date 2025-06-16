@@ -2,6 +2,7 @@
 
 #pragma curve bn128
 import "utils/pack/bool/pack256" as pack; // Assuming this path is correct for your ZoKrates environment and 'pack' converts bool[256] to a field element
+import "utils/pack/bool/unpack256" as unpack;
 import "utils/casts/bool_256_to_u32_8" as to32;
 import "hashes/sha256/256bitPadded" as sha;
 
@@ -70,12 +71,8 @@ def reverse256(bool[256] arr) -> bool[256] {
 def main(
     private  bool[256] gamma,      // 256 bits of private input for gamma
     private bool[256] beta,       // 256 bits of private input for beta
-    private bool[256] b_g_scalar_bits,
     public u32[8] hash_gamma,    
-    public field[2] gen,           // Public base point G1 (on bn256)
-    public field[2] gg,           // Public input: claimed g1^gamma
-    public field[2] gb,           // Public input: claimed g2^beta
-    public field[2] c_star        // Public input: claimed c* = g1^(beta/gamma)
+    public field[2] gen         // Public base point G1 (on bn256)
 ) -> (field[2], field[2], field[2]) { // Returns the calculated points
 
     //  Check that hashed gamma is equal to the passed gamma.
@@ -86,31 +83,21 @@ def main(
     // Pack boolean arrays (representing scalars) into field elements.
     field f_gamma = pack(gamma);
     field f_beta = pack(beta);
-    field f_b_g_scalar = pack(b_g_scalar_bits);
-    assert(f_b_g_scalar * f_gamma == f_beta);
-
-    // Ensure f_gamma is not zero to prevent division by zero.
     assert(f_gamma != 0);
+    field f_b_g_scalar = f_beta/f_gamma;
+    bool[256] b_g_scalar_bits = unpack(f_b_g_scalar);
+
     assert(f_beta != 0);
 
 
     // Calculate c_star_calculated = g1^(beta/gamma)
     field[2] c_star_calculated = scalar_mul(b_g_scalar_bits, gen);
 
-    // Assert that the calculated c* matches the public input c_star.
-     assert(c_star[0] == c_star_calculated[0] && c_star[1] == c_star_calculated[1]);
-
     // Calculate g_gamma_calculated = g1^gamma.
     field[2]  g_gamma_calculated = scalar_mul(gamma, gen);
 
-    // Assert that the calculated g1^gamma matches the public input gg.
-    assert(gg[0] == g_gamma_calculated[0] && gg[1] == g_gamma_calculated[1]);
-
     // Calculate g_beta_calculated = g2^beta
     field[2] g_beta_calculated = scalar_mul(beta, gen);
-
-    // Assert that the calculated g2^beta matches the public input gb.
-    assert(gb[0] == g_beta_calculated[0] && gb[1] == g_beta_calculated[1]);
 
     // Return the calculatued values. These values have been asserted to match
     // the corresponding public inputs, proving consistency.
