@@ -1,0 +1,66 @@
+import "utils/casts/u32_to_bits" as u32_to_bits;
+import "utils/casts/bool_256_to_u32_8" as to_u32_8;
+import "hashes/sha256/256bitPadded" as sha;
+
+const u32 MAX_BIDDERS = 5;
+
+def main(
+    private u32[MAX_BIDDERS] bids,
+    public u32[MAX_BIDDERS][8] commitments,
+    public u32[8] winning_commitment
+) {
+    // First, verify all bid commitments
+    for u32 i in 0..MAX_BIDDERS {
+        // Convert bid to 32 bits (big endian)
+        bool[32] bid_bits = u32_to_bits(bids[i]);
+
+        // Pad to 256 bits
+        bool[256] mut padded_bits = [false; 256];
+        for u32 j in 0..32 {
+            padded_bits[j] = bid_bits[j];
+        }
+
+        // Compute hash
+        u32[8] hash_output = sha(to_u32_8(padded_bits));
+
+        // Assert each piece of commitment
+        for u32 k in 0..8 {
+            assert(hash_output[k] == commitments[i][k]);
+        }
+    }
+
+    // Find minimum bid with tie-breaking (first bidder wins)
+    // Compute minimum bid and index using ternary expressions
+    u32 mut min_bid = bids[0];
+    u32 mut min_index = 0;
+
+    for u32 i in 1..MAX_BIDDERS {
+        bool is_less = bids[i] < min_bid;
+        min_bid = is_less ? bids[i] : min_bid;
+        min_index = is_less ? i : min_index;
+    }
+
+    // Set winner flags using ternary logic
+    bool[MAX_BIDDERS] mut is_minimum = [false; MAX_BIDDERS];
+    for u32 i in 0..MAX_BIDDERS {
+        is_minimum[i] = (i == min_index);
+    }
+    
+    // Find the winning commitment directly from the commitments array
+    u32[8] mut computed_winning_commitment = [0; 8];
+    
+    for u32 i in 0..MAX_BIDDERS {
+        // Add this commitment to result if this is the minimum bidder
+        for u32 k in 0..8 {
+            computed_winning_commitment[k] = computed_winning_commitment[k] + 
+                (is_minimum[i] ? commitments[i][k] : 0);
+        }
+    }
+    
+    // Assert the computed winning commitment matches the public input
+    for u32 k in 0..8 {
+        assert(computed_winning_commitment[k] == winning_commitment[k]);
+    }
+
+    return;
+}

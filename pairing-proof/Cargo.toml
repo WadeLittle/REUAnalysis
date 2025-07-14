@@ -1,0 +1,20 @@
+[package]
+name = "pairing-proof"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ark-ff = "0.5"
+ark-ec = "0.5"
+ark-std = { version = "0.5", features = ["std"] }
+ark-relations = "0.5"
+ark-r1cs-std = { version = "0.5.0-alpha.0", features = ["std"] }
+ark-snark = "0.5"
+rand = { version = "0.8", features = ["std_rng"] }
+ark-groth16 = "0.5"
+ark-bls12-377 = { version = "0.5.0", default-features = false, features = ["curve", "r1cs"] }
+ark-bw6-761 = "0.5"
+ark-crypto-primitives = { version = "0.5", features = ["crh", "r1cs"] }
+sha2 = "0.10"
+ark-poly = "0.5"
+[dev-dependencies]

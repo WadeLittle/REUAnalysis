@@ -1,0 +1,127 @@
+use ark_ff::{Field, PrimeField};
+use ark_r1cs_std::{
+    alloc::{AllocVar, AllocationMode},
+    fields::fp::FpVar,
+    uint8::UInt8,
+    prelude::*,
+};
+use ark_relations::{
+    r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError},
+};
+use ark_crypto_primitives::crh::sha256::constraints::UnitVar;
+use ark_bls12_381::Fr;
+use ark_crypto_primitives::{
+    crh::{
+        sha256::{constraints::Sha256Gadget, Sha256},
+        CRHScheme, CRHSchemeGadget,
+    },
+};
+use ark_std::vec::Vec;
+
+#[derive(Clone)]
+pub struct ElGamalEncryptionCircuit {
+    pub ct: [Fr; 2],  // Ciphertext (c1, c2)
+    pub bid: [u8; 32], // Block ID as a hash of the message
+    pub hdk: Fr,       // Private key (Hierarchical Derived Key)
+}
+
+impl ConstraintSynthesizer<Fr> for ElGamalEncryptionCircuit {
+    fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+        // Allocate ciphertext as public inputs
+        let ct_var = [
+            FpVar::<Fr>::new_input(cs.clone(), || Ok(self.ct[0]))?,
+            FpVar::<Fr>::new_input(cs.clone(), || Ok(self.ct[1]))?,
+        ];
+        
+        // Allocate block ID as public input
+        let bid_var = UInt8::<Fr>::new_input_vec(cs.clone(), &self.bid.to_vec())?;
+        
+        // Allocate private key as witness (private input)
+        let hdk_var = FpVar::<Fr>::new_witness(cs.clone(), || Ok(self.hdk))?;
+
+        let hdk_bits = hdk_var.to_bits_le()?;
+
+        let mut result = FpVar::<Fr>::one();
+        let mut base = ct_var[0].clone();
+
+        // In-circuit exponentiation of ct[0]^hdk using square-and-multiply
+        // Must do this because hdk isn't a constant
+        for bit in hdk_bits.iter() {
+            let temp = &result * &base;
+            result = bit.select(&temp, &result)?;
+            base = &base * &base; // Square the base for next bit
+        }
+        // ElGamal decryption: m = c2 / (c1^hdk)
+        // First compute s = c1^hdk (shared secret)
+        let s = result;
+        
+        // Compute inverse of s
+        let inverse_s = s.inverse()?;
+        
+        // Decrypt message: m = c2 * s^(-1)
+        let m = &ct_var[1] * &inverse_s;
+
+        // Convert message to bytes for hashing
+        let m_bytes = m.to_bytes_le()?;
+
+        // Compute SHA256 hash of the message
+        let params_var = UnitVar::default();
+        let hash_k = Sha256Gadget::evaluate(&params_var, &m_bytes)?;
+
+        // Convert hash result to bytes for comparison
+        let hash_bytes = hash_k.to_bytes_le()?;
+
+        // Ensure the hash matches the block ID
+        // We need to compare only the first 32 bytes of the hash
+        for i in 0..32 {
+            hash_bytes[i].enforce_equal(&bid_var[i])?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_relations::r1cs::ConstraintSystem;
+    use ark_std::test_rng;
+    use ark_ff::UniformRand;
+    use sha2::{Sha256, Digest};
+
+    #[test]
+    fn test_elgamal_circuit() {
+        let mut rng = test_rng();
+        
+        // Generate random values for testing
+        let hdk = Fr::rand(&mut rng);
+        let message = Fr::rand(&mut rng);
+        
+        // Simulate ElGamal encryption
+        let r = Fr::rand(&mut rng); // Random value for encryption
+        let c1 = Fr::from(2u64).pow([r.into_bigint()]); // g^r (simplified with g=2)
+        let c2 = message * Fr::from(2u64).pow([hdk.into_bigint() * r.into_bigint()]); // m * h^r
+        
+        // Compute block ID as hash of message
+        let mut hasher = Sha256::new();
+        let message_bytes = message.into_bigint().to_bytes_le();
+        hasher.update(&message_bytes);
+        let hash_result = hasher.finalize();
+        let mut bid = [0u8; 32];
+        bid.copy_from_slice(&hash_result);
+
+        // Create circuit
+        let circuit = ElGamalEncryptionCircuit {
+            ct: [c1, c2],
+            bid,
+            hdk,
+        };
+
+        // Test constraint system
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        circuit.generate_constraints(cs.clone()).unwrap();
+        
+        println!("Number of constraints: {}", cs.num_constraints());
+        assert!(cs.is_satisfied().unwrap());
+    }
+}
